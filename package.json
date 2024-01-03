@@ -1,0 +1,15 @@
+{
+	"name": "snobs-generator",
+	"version": "1.0.0",
+	"main": "index.js",
+	"license": "MIT",
+	"scripts": {
+		"start": "node index.js",
+		"predocker:start": "yarn",
+		"docker:start": "yarn start"
+	},
+	"dependencies": {
+		"locate-chrome": "^0.1.1",
+		"puppeteer": "^21.6.1"
+	}
+}
