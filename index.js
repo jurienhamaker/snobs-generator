@@ -12,7 +12,45 @@ const path = require('path');
 const puppeteer = require('puppeteer');
 const locateChrome = require('locate-chrome');
 
-const generateVariants = () => {
+const minimal_args = [
+	'--autoplay-policy=user-gesture-required',
+	'--disable-background-networking',
+	'--disable-background-timer-throttling',
+	'--disable-backgrounding-occluded-windows',
+	'--disable-breakpad',
+	'--disable-client-side-phishing-detection',
+	'--disable-component-update',
+	'--disable-default-apps',
+	'--disable-dev-shm-usage',
+	'--disable-domain-reliability',
+	'--disable-extensions',
+	'--disable-features=AudioServiceOutOfProcess',
+	'--disable-hang-monitor',
+	'--disable-ipc-flooding-protection',
+	'--disable-notifications',
+	'--disable-offer-store-unmasked-wallet-cards',
+	'--disable-popup-blocking',
+	'--disable-print-preview',
+	'--disable-prompt-on-repost',
+	'--disable-renderer-backgrounding',
+	'--disable-setuid-sandbox',
+	'--disable-speech-api',
+	'--disable-sync',
+	'--hide-scrollbars',
+	'--ignore-gpu-blacklist',
+	'--metrics-recording-only',
+	'--mute-audio',
+	'--no-default-browser-check',
+	'--no-first-run',
+	'--no-pings',
+	'--no-sandbox',
+	'--no-zygote',
+	'--password-store=basic',
+	'--use-gl=swiftshader',
+	'--use-mock-keychain',
+];
+
+const generateVariants = async () => {
 	const variants = [];
 
 	for (const body of bodies) {
@@ -50,33 +88,35 @@ const generateVariants = () => {
 		}
 	}
 
-	return variants;
+	await fs.promises.writeFile(
+		path.join(process.cwd(), `variants.json`),
+		JSON.stringify(variants, null, 2)
+	);
 };
 
-const generateImages = async (variants) => {
-	const svg = await fs.promises.readFile(
-		path.join(process.cwd(), 'cleaned.svg'),
-		'utf8'
-	);
-
+const createBrowser = async () => {
 	const executablePath =
 		(await new Promise((resolve) => locateChrome((arg) => resolve(arg)))) ||
 		'';
 
 	const browser = await puppeteer.launch({
+		headless: 'new',
 		executablePath,
-		args: [
-			'--no-sandbox',
-			'--disable-setuid-sandbox',
-			'--disable-dev-shm-usage',
-			'--disable-web-security',
-			'--disable-features=IsolateOrigins,site-per-process',
-			'--shm-size=3gb',
-		],
+		args: minimal_args,
 	});
 
-	// await prepareSvg(page);
-	// await writeOutputSvg(page);
+	return browser;
+};
+
+const generateImages = async () => {
+	const variants = require('./variants.json');
+
+	const svg = await fs.promises.readFile(
+		path.join(process.cwd(), 'cleaned.svg'),
+		'utf8'
+	);
+
+	const browser = await createBrowser();
 
 	const filtered = variants.filter(
 		(v) => v.body.name === process.env.BODY_TYPE
@@ -90,17 +130,33 @@ const generateImages = async (variants) => {
 	);
 	for (let i = 0; i < chunked.length; i++) {
 		promises.push(
-			processBatch(
-				browser,
-				chunked[i],
-				svg,
-				i * chunkSize,
-				filtered.length
-			)
+			processBatch(chunked[i], svg, i * chunkSize, filtered.length)
 		);
 	}
 
 	await Promise.all(promises);
+	await browser.close();
+};
+
+const cleanSVG = async () => {
+	const browser = await createBrowser();
+	const page = await browser.newPage();
+
+	page.on('console', async (msg) => {
+		const msgArgs = msg.args();
+		for (let i = 0; i < msgArgs.length; ++i) {
+			console.log(await msgArgs[i].jsonValue());
+		}
+	});
+
+	await prepareSvg(page);
+
+	const data = await page.evaluate(
+		() => document.querySelector('svg').outerHTML
+	);
+	await fs.promises.writeFile(path.join(process.cwd(), `cleaned.svg`), data);
+
+	await page.close();
 	await browser.close();
 };
 
@@ -247,19 +303,11 @@ const generateVariantImage = async (variant, svg, page, index, total) => {
 	}, variant);
 
 	const content = await page.$('body');
-	const imageBuffer = await content.screenshot({ omitBackground: true });
-	await fs.promises.writeFile(
-		path.join(process.cwd(), 'output', `${name}.png`),
-		imageBuffer
-	);
+	await content.screenshot({
+		path: `output/${name}.png`,
+		omitBackground: true,
+	});
 	console.log(`[${index + 1}/${total}] Saved "${name}.png" to output folder`);
-};
-
-const writeOutputSvg = async (page, location = 'cleaned.svg') => {
-	const data = await page.evaluate(
-		() => document.querySelector('svg').outerHTML
-	);
-	await fs.promises.writeFile(path.join(process.cwd(), location), data);
 };
 
 const getVariantName = (variant, index) => {
@@ -271,7 +319,20 @@ const getVariantName = (variant, index) => {
 };
 
 (async () => {
-	const variants = generateVariants();
-	// console.log(variants.length);
-	await generateImages(variants);
+	let fn;
+	switch (process.env.TASK) {
+		case 'GENERATE_VARIANTS':
+			fn = generateVariants;
+			break;
+		case 'GENERATE_IMAGES':
+			fn = generateImages;
+			break;
+		case 'CLEAN_SVG':
+			fn = cleanSVG;
+			break;
+	}
+
+	console.log(`Running task: ${process.env.TASK}`);
+	await fn();
+	console.log(`Finished task: ${process.env.TASK}`);
 })();

@@ -8,5 +8,26 @@ services:
         environment:
             - BODY_TYPE=Coupe
             - CHUNK_SIZE=58
+            - TASK=GENERATE_IMAGES
+        volumes:
+            - ./:/opt/app
+    sedan_big:
+        build: .
+        tty: true
+        command: yarn docker:start
+        environment:
+            - BODY_TYPE=Sedan (Big)
+            - CHUNK_SIZE=58
+            - TASK=GENERATE_IMAGES
+        volumes:
+            - ./:/opt/app
+    sedan_small:
+        build: .
+        tty: true
+        command: yarn docker:start
+        environment:
+            - BODY_TYPE=Sedan (Small)
+            - CHUNK_SIZE=58
+            - TASK=GENERATE_IMAGES
         volumes:
             - ./:/opt/app
